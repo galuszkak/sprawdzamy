@@ -14,8 +14,20 @@ VOTE_SELECTOR_IN_PROJECT = "aside.digger strong" # Selector for votes *on the pr
 BIGQUERY_TABLE_ID = "sprawdzamy.votes" # Define BigQuery table ID
 
 def setup_browser(p):
-    browser = p.chromium.launch(headless=config.HEADLESS_BROWSER)
+    browser_type = random.choice(['chromium', 'firefox'])
+    print(f"Attempting to launch browser: {browser_type}")
+    if browser_type == 'chromium':
+        browser = p.chromium.launch(headless=config.HEADLESS_BROWSER)
+    elif browser_type == 'firefox':
+        # Ensure Firefox is installed: playwright install firefox
+        browser = p.firefox.launch(headless=config.HEADLESS_BROWSER)
+    else:
+        # Fallback or error, though random.choice makes this unlikely
+        print("Defaulting to chromium due to unexpected choice.")
+        browser = p.chromium.launch(headless=config.HEADLESS_BROWSER)
+
     page = browser.new_page()
+    print(f"Browser {browser_type} launched successfully.")
     return browser, page
 
 def scrape_votes(page):

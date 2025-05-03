@@ -32,7 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Install Playwright browsers
-RUN playwright install --with-deps chromium
+RUN playwright install --with-deps chromium && playwright install --with-deps firefox
 
 # Copy the source code
 COPY src/ ./src/
