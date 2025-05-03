@@ -2,3 +2,4 @@ beautifulsoup4
 requests
 pandas
 playwright
+google-cloud-bigquery

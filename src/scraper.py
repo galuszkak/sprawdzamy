@@ -1,8 +1,8 @@
 import time
-import json
-import random # Import random module
+import random
 from datetime import datetime, timezone
 from playwright.sync_api import sync_playwright
+from google.cloud import bigquery # Import BigQuery library
 import config
 
 # Configuration
@@ -11,6 +11,7 @@ PROJECT_ARTICLE_SELECTOR = ".ideas article.idea"
 PROJECT_NAME_SELECTOR = "h2 a" # Used for name and URL
 VOTE_SELECTOR = "strong" # For votes on the main listing page
 VOTE_SELECTOR_IN_PROJECT = "aside.digger strong" # Selector for votes *on the project page* - ADJUST IF NEEDED
+BIGQUERY_TABLE_ID = "sprawdzamy.votes" # Define BigQuery table ID
 
 def setup_browser(p):
     browser = p.chromium.launch(headless=config.HEADLESS_BROWSER)
@@ -36,7 +37,7 @@ def scrape_votes(page):
 
             vote_element = article.locator(VOTE_SELECTOR)
             main_votes_text = vote_element.text_content().strip() if vote_element.count() > 0 else "0"
-            main_votes = main_votes_text.split()[0] # Assuming format "123 Głosów"
+            main_votes = main_votes_text.split()[0]
 
             if project_url:
                 # Ensure the URL is absolute
@@ -61,31 +62,40 @@ def scrape_votes(page):
     print(f"\nVisiting {len(initial_data)} project pages...")
     for idx, data in enumerate(initial_data):
         print(f"Processing project {idx+1}/{len(initial_data)}: {data['project_name']}")
+        project_votes_int = None # Default to None for nullable field
+        main_votes_int = 0 # Default to 0 for required field
+
         try:
+            # Convert main_votes from initial scrape (already string)
+            main_votes_str = data["main_votes"]
+            main_votes_int = int(main_votes_str) if main_votes_str.isdigit() else 0
+
             page.goto(data["project_url"])
             page.wait_for_load_state('networkidle') # Wait for project page to load
 
             # Scrape votes from the project page using the specific selector
             project_vote_element = page.locator(VOTE_SELECTOR_IN_PROJECT).first # Assume first match is the one
-            project_votes_text = project_vote_element.text_content().strip() if project_vote_element.count() > 0 else "0"
-            project_votes = project_votes_text.split()[0] # Assuming format "123 Głosów"
+            project_votes_text = project_vote_element.text_content().strip() if project_vote_element.count() > 0 else None
+            if project_votes_text:
+                project_votes_str = project_votes_text.split()[0] # Assuming format "123 Głosów"
+                project_votes_int = int(project_votes_str) if project_votes_str.isdigit() else None # Convert to int or None
+
             result = {
                 "project_name": data["project_name"],
-                "main_votes": data["main_votes"],
-                "project_votes": project_votes, # Add the project page votes
+                "main_page_votes": main_votes_int, # Use converted int
+                "project_page_votes": project_votes_int, # Use converted int or None
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
-            
             results.append(result)
-            print(result)
+            # print(result) # Optional: print the processed result
 
         except Exception as e:
             print(f"Error visiting or scraping project page {data['project_url']}: {e}")
-            # Append partial data or skip
+            # Append partial data with default/error values if needed, ensuring types are correct
             results.append({
                 "project_name": data["project_name"],
-                "main_votes": data["main_votes"],
-                "project_votes": "Error", # Indicate error
+                "main_page_votes": main_votes_int, # Use already converted or default int
+                "project_page_votes": None, # Default to None on error for nullable field
                 "timestamp": datetime.now(timezone.utc).isoformat()
             })
         finally:
@@ -98,36 +108,35 @@ def scrape_votes(page):
     return results
 
 def main():
+    # Initialize BigQuery client - assumes Application Default Credentials (ADC)
+    try:
+        bq_client = bigquery.Client()
+        print(f"BigQuery client initialized. Target table: {BIGQUERY_TABLE_ID}")
+    except Exception as e:
+        print(f"Error initializing BigQuery client: {e}")
+        print("Please ensure you have authenticated with Google Cloud (e.g., using `gcloud auth application-default login`)")
+        return # Exit if client cannot be initialized
+
     with sync_playwright() as p:
         browser, page = setup_browser(p)
 
         try:
             scraped_data = scrape_votes(page)
-            processed_data = []
-            for data in scraped_data:
+            if scraped_data:
+                print(f"\nAttempting to insert {len(scraped_data)} rows into BigQuery table {BIGQUERY_TABLE_ID}...")
                 try:
-                    # Ensure votes are integers before printing
-                    main_votes_int = int(data["main_votes"]) if isinstance(data["main_votes"], str) and data["main_votes"].isdigit() else 0
-                    project_votes_int = int(data["project_votes"]) if isinstance(data["project_votes"], str) and data["project_votes"].isdigit() else 0 # Handle potential "Error" string
-
-                    processed_data.append({
-                        "project_name": data["project_name"],
-                        "main_votes": main_votes_int,
-                        "project_votes": project_votes_int, # Add project votes
-                        "timestamp": data["timestamp"]
-                    })
-                except ValueError as ve:
-                     print(f"Could not convert votes to int for {data.get('project_name', 'N/A')}: main='{data.get('main_votes', 'N/A')}', project='{data.get('project_votes', 'N/A')}'. Error: {ve}")
+                    # Directly use scraped_data as it contains the correctly formatted rows
+                    errors = bq_client.insert_rows_json(BIGQUERY_TABLE_ID, scraped_data)
+                    if not errors:
+                        print(f"Successfully inserted {len(scraped_data)} rows into {BIGQUERY_TABLE_ID}.")
+                    else:
+                        print("Encountered errors while inserting rows into BigQuery:")
+                        for error in errors:
+                            print(error)
                 except Exception as e:
-                    print(f"Error processing data row: {data}. Error: {e}")
-
-            # Print the final processed data
-            print("\n--- Scraped Data ---")
-            if processed_data:
-                print(json.dumps(processed_data, indent=2, ensure_ascii=False))
+                    print(f"Error inserting data into BigQuery: {e}")
             else:
-                print("No data scraped or processed.")
-            print("--- End of Scraped Data ---")
+                print("No data scraped to insert into BigQuery.")
 
         finally:
             browser.close()
