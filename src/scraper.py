@@ -98,12 +98,6 @@ def scrape_votes(page):
                 "project_page_votes": None, # Default to None on error for nullable field
                 "timestamp": datetime.now(timezone.utc).isoformat()
             })
-        finally:
-             # Add random delay only if it's not the last project
-            if idx < len(initial_data) - 1:
-                delay = random.uniform(3, 8)
-                print(f"Waiting for {delay:.2f} seconds before next project...")
-                time.sleep(delay)
 
     return results
 
