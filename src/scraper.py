@@ -77,7 +77,7 @@ def scrape_votes(page):
             project_vote_element = page.locator(VOTE_SELECTOR_IN_PROJECT).first # Assume first match is the one
             project_votes_text = project_vote_element.text_content().strip() if project_vote_element.count() > 0 else None
             if project_votes_text:
-                project_votes_str = project_votes_text.split()[0] # Assuming format "123 Głosów"
+                project_votes_str = project_votes_text.split()[0] 
                 project_votes_int = int(project_votes_str) if project_votes_str.isdigit() else None # Convert to int or None
 
             result = {
@@ -108,15 +108,6 @@ def scrape_votes(page):
     return results
 
 def main():
-    # Initialize BigQuery client - assumes Application Default Credentials (ADC)
-    try:
-        bq_client = bigquery.Client()
-        print(f"BigQuery client initialized. Target table: {BIGQUERY_TABLE_ID}")
-    except Exception as e:
-        print(f"Error initializing BigQuery client: {e}")
-        print("Please ensure you have authenticated with Google Cloud (e.g., using `gcloud auth application-default login`)")
-        return # Exit if client cannot be initialized
-
     with sync_playwright() as p:
         browser, page = setup_browser(p)
 
@@ -126,6 +117,7 @@ def main():
                 print(f"\nAttempting to insert {len(scraped_data)} rows into BigQuery table {BIGQUERY_TABLE_ID}...")
                 try:
                     # Directly use scraped_data as it contains the correctly formatted rows
+                    bq_client = bigquery.Client()
                     errors = bq_client.insert_rows_json(BIGQUERY_TABLE_ID, scraped_data)
                     if not errors:
                         print(f"Successfully inserted {len(scraped_data)} rows into {BIGQUERY_TABLE_ID}.")
