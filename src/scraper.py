@@ -87,7 +87,7 @@ def scrape_votes(page):
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
             results.append(result)
-            # print(result) # Optional: print the processed result
+            print(result) # Optional: print the processed result
 
         except Exception as e:
             print(f"Error visiting or scraping project page {data['project_url']}: {e}")
@@ -101,7 +101,7 @@ def scrape_votes(page):
         finally:
              # Add random delay only if it's not the last project
             if idx < len(initial_data) - 1:
-                delay = random.uniform(5, 25)
+                delay = random.uniform(3, 8)
                 print(f"Waiting for {delay:.2f} seconds before next project...")
                 time.sleep(delay)
 
