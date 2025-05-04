@@ -3,3 +3,4 @@ requests
 pandas
 playwright
 google-cloud-bigquery
+google-cloud-storage # Add GCS library

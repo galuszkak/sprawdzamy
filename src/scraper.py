@@ -1,9 +1,10 @@
-import time
 import random
+import os # Import os for path manipulation
 from datetime import datetime, timezone
 from playwright.sync_api import sync_playwright
-from google.cloud import bigquery # Import BigQuery library
+from google.cloud import bigquery
 import config
+from google.cloud import storage
 
 # Configuration
 TARGET_URL = config.TARGET_URL
@@ -12,6 +13,7 @@ PROJECT_NAME_SELECTOR = "h2 a" # Used for name and URL
 VOTE_SELECTOR = "strong" # For votes on the main listing page
 VOTE_SELECTOR_IN_PROJECT = "aside.digger strong" # Selector for votes *on the project page* - ADJUST IF NEEDED
 BIGQUERY_TABLE_ID = "sprawdzamy.votes" # Define BigQuery table ID
+SCREENSHOT_TEMP_DIR = config.SCREENSHOT_TEMP_DIR # Get temp dir from config
 
 def setup_browser(p):
     browser_type = random.choice(['chromium', 'firefox'])
@@ -33,6 +35,28 @@ def setup_browser(p):
 def scrape_votes(page):
     page.goto(TARGET_URL)
     page.wait_for_load_state('networkidle')
+
+    # --- Take Screenshot ---
+    screenshot_path = None
+    try:
+        # NOTE: Requires 'pytz' library: pip install pytz
+        import pytz # Import pytz for timezone handling
+
+        # Ensure the temporary directory exists
+        os.makedirs(SCREENSHOT_TEMP_DIR, exist_ok=True)
+
+        # Get the Warsaw timezone
+        warsaw_tz = pytz.timezone('Europe/Warsaw')
+        # Get current time in Warsaw timezone and format it
+        timestamp_str = datetime.now(warsaw_tz).strftime("%Y%m%d_%H%M%S_%Z%z")
+
+        screenshot_filename = f"main_page_{timestamp_str}.png"
+        screenshot_path = os.path.join(SCREENSHOT_TEMP_DIR, screenshot_filename)
+        page.screenshot(path=screenshot_path, full_page=True)
+        print(f"Screenshot saved locally to: {screenshot_path}")
+    except Exception as e:
+        print(f"Error taking or saving screenshot: {e}")
+        screenshot_path = None # Ensure path is None if screenshot failed
 
     project_articles = page.locator(PROJECT_ARTICLE_SELECTOR)
     initial_data = []
@@ -111,33 +135,52 @@ def scrape_votes(page):
                 "timestamp": datetime.now(timezone.utc).isoformat()
             })
 
-    return results
+    # Return both results and the path to the screenshot
+    return results, screenshot_path
 
 def main():
+    scraped_data = []
+    screenshot_path = ""
     with sync_playwright() as p:
-        browser, page = setup_browser(p)
 
         try:
-            scraped_data = scrape_votes(page)
-            if scraped_data:
-                print(f"\nAttempting to insert {len(scraped_data)} rows into BigQuery table {BIGQUERY_TABLE_ID}...")
-                try:
-                    # Directly use scraped_data as it contains the correctly formatted rows
-                    bq_client = bigquery.Client()
-                    errors = bq_client.insert_rows_json(BIGQUERY_TABLE_ID, scraped_data)
-                    if not errors:
-                        print(f"Successfully inserted {len(scraped_data)} rows into {BIGQUERY_TABLE_ID}.")
-                    else:
-                        print("Encountered errors while inserting rows into BigQuery:")
-                        for error in errors:
-                            print(error)
-                except Exception as e:
-                    print(f"Error inserting data into BigQuery: {e}")
-            else:
-                print("No data scraped to insert into BigQuery.")
-
+            browser, page = setup_browser(p)        
+            scraped_data, screenshot_path = scrape_votes(page)    
         finally:
             browser.close()
 
+    if scraped_data:
+        print(f"\nAttempting to insert {len(scraped_data)} rows into BigQuery table {BIGQUERY_TABLE_ID}...")
+        try:
+            # Directly use scraped_data as it contains the correctly formatted rows
+            bq_client = bigquery.Client()
+            errors = bq_client.insert_rows_json(BIGQUERY_TABLE_ID, scraped_data)
+            if not errors:
+                print(f"Successfully inserted {len(scraped_data)} rows into {BIGQUERY_TABLE_ID}.")
+            else:
+                print("Encountered errors while inserting rows into BigQuery:")
+                for error in errors:
+                    print(error)
+        except Exception as e:
+            print(f"Error inserting data into BigQuery: {e}")
+    else:
+        print("No data scraped to insert into BigQuery.")
+
+    if screenshot_path:
+        # --- Upload Screenshot to GCS ---
+        try:
+            storage_client = storage.Client()
+            bucket = storage_client.bucket(config.GCS_BUCKET_NAME)
+            # Extract filename from the full path
+            destination_blob_name = os.path.basename(screenshot_path)
+            blob = bucket.blob(destination_blob_name)
+
+            blob.upload_from_filename(screenshot_path)
+            print(f"Screenshot successfully uploaded to gs://{config.GCS_BUCKET_NAME}/{destination_blob_name}")
+
+
+        except Exception as e:
+            print(f"Error uploading screenshot to GCS: {e}")
+    
 if __name__ == "__main__":
     main()
