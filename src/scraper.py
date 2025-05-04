@@ -1,6 +1,8 @@
 import random
-import os # Import os for path manipulation
+import os
+import time 
 from datetime import datetime, timezone
+
 from playwright.sync_api import sync_playwright
 from google.cloud import bigquery
 import config
@@ -35,6 +37,21 @@ def setup_browser(p):
 def scrape_votes(page):
     page.goto(TARGET_URL)
     page.wait_for_load_state('networkidle')
+
+    # --- Handle Cookie Consent ---
+    try:
+        cookie_decline_button = page.locator("#CybotCookiebotDialogBodyButtonDecline")
+        if cookie_decline_button.is_visible(): # Check if the button is visible before clicking
+            print("Cookie consent decline button found. Clicking...")
+            cookie_decline_button.click()
+            print("Waiting 3 seconds after clicking cookie button...")
+            time.sleep(3) # Wait exactly 3 seconds
+        else:
+            print("Cookie consent decline button not visible or not found.")
+    except Exception as e:
+        print(f"Error handling cookie consent: {e}")
+        # Optionally wait even if there's an error, or proceed
+        print("Proceeding without explicit cookie decline.")
 
     # --- Take Screenshot ---
     screenshot_path = None

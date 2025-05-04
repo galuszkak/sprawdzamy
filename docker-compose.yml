@@ -6,6 +6,7 @@ services:
     container_name: web-scraper-gcp
     volumes:
       - ./src:/app/src  # Mount the src directory for development
+      - ./screenshots:/tmp/screenshots
     command: ["python", "src/scraper.py"]
     # If you need Google Cloud credentials locally, uncomment and configure:
     # environment:
